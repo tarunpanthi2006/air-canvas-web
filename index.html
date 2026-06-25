@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Tarun Panthi's Air Canvas ✨</title>
+    <meta name="description" content="Draw in the air with hand gestures — free AR drawing app powered by AI hand tracking. No download required.">
+    <meta name="theme-color" content="#06060F">
+    <meta name="color-scheme" content="dark">
+    <meta property="og:title" content="Air Canvas — Draw in the Air">
+    <meta property="og:description" content="Free augmented reality drawing app. Use hand gestures to create art — right in your browser.">
+    <meta property="og:type" content="website">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-content">
+            <div class="loading-icon">🎨</div>
+            <h1 class="loading-title">Tarun Panthi's Air Canvas</h1>
+            <p class="loading-subtitle">Loading hand tracking AI...</p>
+            <div class="loading-bar">
+                <div class="loading-bar-fill" id="loading-bar-fill"></div>
+            </div>
+            <p class="loading-status" id="loading-status">Initializing MediaPipe...</p>
+        </div>
+    </div>
+
+    <!-- Permission Screen -->
+    <div id="permission-screen" class="permission-screen hidden">
+        <div class="permission-content">
+            <div class="permission-icon">📸</div>
+            <h1>Camera Access Required</h1>
+            <p>Air Canvas needs camera access to track your hand gestures. No data is stored — everything happens locally in your browser.</p>
+            <button id="grant-camera-btn" class="btn-primary">
+                <span>Grant Camera Access</span>
+            </button>
+            <p class="permission-note">🔒 100% private. Camera is used only for real-time hand tracking.</p>
+        </div>
+    </div>
+
+    <!-- Gesture Guide Modal -->
+    <div id="gesture-guide" class="modal-overlay hidden">
+        <div class="gesture-guide-card">
+            <h2>✨ Gesture Guide</h2>
+            <div class="gesture-list">
+                <div class="gesture-item">
+                    <span class="gesture-emoji">☝️</span>
+                    <div>
+                        <strong>1 Finger</strong>
+                        <p>Draw with selected color</p>
+                    </div>
+                </div>
+                <div class="gesture-item">
+                    <span class="gesture-emoji">✌️</span>
+                    <div>
+                        <strong>2-3 Fingers</strong>
+                        <p>Move / Navigate</p>
+                    </div>
+                </div>
+                <div class="gesture-item">
+                    <span class="gesture-emoji">🖐️</span>
+                    <div>
+                        <strong>Open Palm</strong>
+                        <p>Erase</p>
+                    </div>
+                </div>
+                <div class="gesture-item">
+                    <span class="gesture-emoji">✊</span>
+                    <div>
+                        <strong>Fist</strong>
+                        <p>Pause drawing</p>
+                    </div>
+                </div>
+            </div>
+            <button id="guide-dismiss-btn" class="btn-primary">
+                <span>Got it! Let's draw 🎨</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="app-container" class="app-container hidden">
+        <video id="camera-video" autoplay playsinline muted></video>
+        <canvas id="drawing-canvas"></canvas>
+        <canvas id="hand-canvas"></canvas>
+        <canvas id="cursor-canvas"></canvas>
+        <div class="vignette"></div>
+
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <div class="app-title">
+                <span class="app-title-text">Tarun Panthi's Air Canvas</span>
+            </div>
+            <div class="top-actions">
+                <button id="hand-toggle-btn" class="icon-btn" title="Switch hand">
+                    <span>🤚</span>
+                    <span class="icon-label" id="hand-label">Right</span>
+                </button>
+                <button id="camera-flip-btn" class="icon-btn" title="Flip camera">
+                    <span>🔄</span>
+                </button>
+                <button id="help-btn" class="icon-btn" title="Gesture guide">
+                    <span>❓</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Mode Indicator -->
+        <div id="mode-indicator" class="mode-indicator" data-mode="idle">
+            <span id="mode-icon">✊</span>
+            <span id="mode-text">Idle</span>
+        </div>
+
+        <!-- FPS Counter -->
+        <div class="fps-counter" id="fps-counter">-- FPS</div>
+
+        <!-- Color Picker Panel -->
+        <div id="color-picker" class="color-picker hidden">
+            <div class="panel-title">Colors</div>
+            <div class="color-grid" id="color-grid"></div>
+        </div>
+
+        <!-- Brush Size Panel -->
+        <div id="brush-panel" class="brush-panel hidden">
+            <div class="panel-title">Brush: <span id="brush-size-label">12</span>px</div>
+            <input type="range" id="brush-slider" min="3" max="50" value="12" class="brush-slider">
+            <div class="brush-preview-container">
+                <div id="brush-preview" class="brush-preview"></div>
+            </div>
+        </div>
+
+        <!-- Bottom Toolbar -->
+        <div class="bottom-toolbar">
+            <div class="toolbar-inner">
+                <button class="tool-btn" id="color-btn" title="Color picker">
+                    <div class="tool-icon" id="color-indicator" style="background: #A855F7;"></div>
+                    <span>Color</span>
+                </button>
+                <button class="tool-btn" id="brush-btn" title="Brush size">
+                    <div class="tool-icon">🖌️</div>
+                    <span>Size</span>
+                </button>
+                <button class="tool-btn" id="undo-btn" title="Undo" disabled>
+                    <div class="tool-icon">↩️</div>
+                    <span>Undo</span>
+                </button>
+                <button class="tool-btn" id="redo-btn" title="Redo" disabled>
+                    <div class="tool-icon">↪️</div>
+                    <span>Redo</span>
+                </button>
+                <button class="tool-btn" id="clear-btn" title="Clear canvas">
+                    <div class="tool-icon">🗑️</div>
+                    <span>Clear</span>
+                </button>
+                <button class="tool-btn" id="save-btn" title="Save artwork">
+                    <div class="tool-icon">💾</div>
+                    <span>Save</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js" type="module"></script>
+</body>
+</html>
