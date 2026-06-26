@@ -308,10 +308,26 @@ class DrawingEngine {
         this._pendingMode = MODE.IDLE;
         this._pendingCount = 0;
         this._SWITCH_FRAMES = IS_MOBILE ? 8 : 4;
+
+        // Mobile pen-up override (toggled by on-screen button)
+        this.penUp = false;
     }
 
     processFrame(landmarks, fingerStates, viewW, viewH) {
         const [thumb, index, middle, ring, pinky] = fingerStates;
+
+        // If pen is lifted via button (mobile), force IDLE
+        if (this.penUp) {
+            if (this.mode !== MODE.IDLE) {
+                this._onModeExit();
+                this.mode = MODE.IDLE;
+            }
+            // Still return the index fingertip position so the cursor shows
+            const tipId = 8;
+            const normX = 1 - landmarks[tipId*2];
+            const normY = landmarks[tipId*2+1];
+            return { x: normX * viewW, y: normY * viewH, mode: MODE.IDLE, visible: true, penUp: true };
+        }
 
         let wantMode;
 
@@ -737,7 +753,11 @@ class AirCanvasApp {
         this.particles.render(this.cursorCtx);
 
         // Cursor
-        this._updateMode(cursor.mode);
+        if (cursor.penUp) {
+            this._updateMode("penup");
+        } else {
+            this._updateMode(cursor.mode);
+        }
         this._renderDrawing();
         this._renderCursor(cursor, vw, vh);
         this._updateToolbarState();
@@ -828,6 +848,27 @@ class AirCanvasApp {
                 break;
             }
         }
+
+        // Ghost cursor when pen is up (draw after switch so it overlays)
+        if (cursor.penUp) {
+            // Dashed circle
+            ctx.setLineDash([6, 4]);
+            ctx.strokeStyle = "rgba(249, 115, 22, 0.5)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x, y, 18, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Inner dimmed dot
+            ctx.globalAlpha = 0.4;
+            ctx.fillStyle = "#F97316";
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
     }
 
     _updateMode(mode) {
@@ -836,8 +877,9 @@ class AirCanvasApp {
             [MODE.IDLE]: { icon: "✊", text: "Idle" },
             [MODE.DRAWING]: { icon: "✏️", text: "Drawing" },
             [MODE.ERASING]: { icon: "🧹", text: "Erasing" },
+            "penup": { icon: "✋", text: "Pen Up" },
         };
-        const c = cfg[mode];
+        const c = cfg[mode] || cfg[MODE.IDLE];
         this.modeIcon.textContent = c.icon;
         this.modeText.textContent = c.text;
     }
@@ -872,6 +914,26 @@ class AirCanvasApp {
         document.getElementById("guide-dismiss-btn").addEventListener("click", () => {
             this.gestureGuide.classList.add("hidden");
         });
+
+        // Mobile pen up/down toggle
+        const penToggle = document.getElementById("pen-toggle-btn");
+        if (penToggle) {
+            penToggle.addEventListener("click", () => {
+                if (!this.drawingEngine) return;
+                this.drawingEngine.penUp = !this.drawingEngine.penUp;
+                const icon = document.getElementById("pen-toggle-icon");
+                const label = document.getElementById("pen-toggle-label");
+                if (this.drawingEngine.penUp) {
+                    icon.textContent = "✋";
+                    label.textContent = "Pen Up";
+                    penToggle.classList.add("pen-up");
+                } else {
+                    icon.textContent = "✏️";
+                    label.textContent = "Pen Down";
+                    penToggle.classList.remove("pen-up");
+                }
+            });
+        }
 
         document.getElementById("help-btn").addEventListener("click", () => {
             this.gestureGuide.classList.toggle("hidden");

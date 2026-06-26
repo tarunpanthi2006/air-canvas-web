@@ -496,6 +496,12 @@ html, body {
     color: var(--neon-cyan);
     box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
 }
+.mode-indicator[data-mode="penup"] {
+    background: rgba(249, 115, 22, 0.18);
+    border: 1px solid rgba(249, 115, 22, 0.4);
+    color: var(--orange);
+    box-shadow: 0 0 20px rgba(249, 115, 22, 0.15);
+}
 
 /* ---------- Color Picker ---------- */
 .color-picker {
@@ -756,5 +762,77 @@ html, body {
     .icon-btn {
         padding: 6px 10px;
         font-size: 0.75rem;
+    }
+}
+
+/* ---------- Pen Toggle Button (Mobile Only) ---------- */
+.pen-toggle-btn {
+    position: absolute;
+    bottom: calc(max(16px, env(safe-area-inset-bottom)) + 80px);
+    right: 16px;
+    z-index: 15;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border: 2px solid rgba(0, 255, 136, 0.4);
+    border-radius: 100px;
+    background: rgba(0, 255, 136, 0.12);
+    color: var(--neon-green);
+    font-family: var(--font);
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow:
+        0 4px 24px rgba(0, 255, 136, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: penBtnAppear 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes penBtnAppear {
+    from { transform: scale(0.7) translateY(20px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.pen-toggle-btn:active {
+    transform: scale(0.92);
+}
+
+.pen-toggle-icon {
+    font-size: 1.3rem;
+    line-height: 1;
+}
+
+.pen-toggle-label {
+    letter-spacing: 0.3px;
+}
+
+/* Pen UP state — amber/orange warning style with pulse */
+.pen-toggle-btn.pen-up {
+    border-color: rgba(249, 115, 22, 0.5);
+    background: rgba(249, 115, 22, 0.15);
+    color: var(--orange);
+    box-shadow:
+        0 4px 24px rgba(249, 115, 22, 0.25),
+        0 0 40px rgba(249, 115, 22, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    animation: penUpPulse 2s ease-in-out infinite;
+}
+
+@keyframes penUpPulse {
+    0%, 100% {
+        box-shadow:
+            0 4px 24px rgba(249, 115, 22, 0.25),
+            0 0 20px rgba(249, 115, 22, 0.08),
+            inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+    50% {
+        box-shadow:
+            0 4px 32px rgba(249, 115, 22, 0.4),
+            0 0 50px rgba(249, 115, 22, 0.15),
+            inset 0 1px 0 rgba(255, 255, 255, 0.08);
     }
 }

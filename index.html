@@ -102,6 +102,13 @@
                         <p>Pause drawing</p>
                     </div>
                 </div>
+                <div class="gesture-item">
+                    <span class="gesture-emoji">✋</span>
+                    <div>
+                        <strong>Pen Up / Down Button</strong>
+                        <p>Tap the floating ✏️ button to lift your pen — move freely without drawing, then tap again to resume</p>
+                    </div>
+                </div>
             </div>
             <script>
                 if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
@@ -165,6 +172,18 @@
                 <div id="brush-preview" class="brush-preview"></div>
             </div>
         </div>
+
+        <!-- Floating Pen Toggle (mobile only) -->
+        <button id="pen-toggle-btn" class="pen-toggle-btn">
+            <span id="pen-toggle-icon" class="pen-toggle-icon">✏️</span>
+            <span id="pen-toggle-label" class="pen-toggle-label">Pen Down</span>
+        </button>
+        <script>
+            // Only show the pen toggle on mobile
+            if (!/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                document.getElementById('pen-toggle-btn').style.display = 'none';
+            }
+        </script>
 
         <!-- Bottom Toolbar -->
         <div class="bottom-toolbar">
