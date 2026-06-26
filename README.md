@@ -6,13 +6,12 @@ Air Canvas uses AI-powered hand tracking (MediaPipe) to let you draw, erase, and
 
 ## 🚀 Try It Live
 
-**[Open Air Canvas →](https://YOUR_USERNAME.github.io/air-canvas-web/)**
-
-> Replace `YOUR_USERNAME` with your GitHub username after deployment.
+**[Open Air Canvas →](https://tarunpanthi2006.github.io/air-canvas-web/)**
 
 ## ✨ Features
 
 - **🖐️ Hand Gesture Drawing** — Point one finger to draw, open palm to erase
+- **✂️ Freehand Lasso Tool** — Draw a custom shape around your art to select and move it
 - **🎨 12 Color Palette** — Vibrant colors from purple to teal
 - **🖌️ Adjustable Brush** — 3px to 50px brush sizes
 - **↩️ Undo/Redo** — Full 30-step history
