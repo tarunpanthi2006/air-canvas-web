@@ -78,62 +78,49 @@ class LandmarkStabilizer {
 }
 
 // ============================================================
-//  FingerDetector — angle-based with hysteresis
+//  FingerDetector — distance-based (much more reliable than angles)
 // ============================================================
 class FingerDetector {
-    constructor(hysteresisFrames = 2) {
-        this.hysteresisFrames = hysteresisFrames;
-        this.counters = new Int32Array(5);
+    constructor() {
         this.states = new Uint8Array(5);
-        this.joints = [
-            [2, 3, 4], [5, 6, 8], [9, 10, 12], [13, 14, 16], [17, 18, 20],
-        ];
+        // Per-finger hysteresis counters to prevent flicker
+        this.counters = new Int32Array(5);
+        this.HYST = 3; // frames required to change state
     }
 
     detect(lm) {
         if (lm.length < 42) return Array.from(this.states);
         const rawStates = new Uint8Array(5);
 
-        // Thumb
-        const thumbAngle = this._angle(lm[4],lm[5], lm[6],lm[7], lm[8],lm[9]);
-        const dTipP = Math.hypot(lm[8]-lm[34], lm[9]-lm[35]);
-        const dMcpP = Math.hypot(lm[4]-lm[34], lm[5]-lm[35]);
-        rawStates[0] = (thumbAngle > 140 && dTipP > dMcpP * 0.85) ? 1 : 0;
+        // === Thumb: compare tip(4) distance to wrist vs ip(3) distance to wrist ===
+        const wristX = lm[0], wristY = lm[1];
+        const thumbTipD = Math.hypot(lm[8] - wristX, lm[9] - wristY); // tip=4 → idx 8,9
+        const thumbIpD  = Math.hypot(lm[6] - wristX, lm[7] - wristY); // ip=3  → idx 6,7
+        rawStates[0] = thumbTipD > thumbIpD * 1.1 ? 1 : 0;
 
-        for (let i = 1; i <= 4; i++) {
-            const [mcp, pip, tip] = this.joints[i];
-            const angle = this._angle(
-                lm[mcp*2], lm[mcp*2+1],
-                lm[pip*2], lm[pip*2+1],
-                lm[tip*2], lm[tip*2+1]
-            );
-            if (angle > 150) rawStates[i] = 1;
-            else if (angle < 125) rawStates[i] = 0;
-            else {
-                const dT = Math.hypot(lm[tip*2]-lm[0], lm[tip*2+1]-lm[1]);
-                const dP = Math.hypot(lm[pip*2]-lm[0], lm[pip*2+1]-lm[1]);
-                rawStates[i] = dT > dP * 1.05 ? 1 : 0;
-            }
+        // === Fingers 1-4: tip must be further from wrist than PIP joint ===
+        const fingerTips = [8, 12, 16, 20]; // landmark IDs
+        const fingerPips = [6, 10, 14, 18]; // PIP joint IDs
+        for (let i = 0; i < 4; i++) {
+            const tipIdx = fingerTips[i];
+            const pipIdx = fingerPips[i];
+            const tipDist = Math.hypot(lm[tipIdx*2] - wristX, lm[tipIdx*2+1] - wristY);
+            const pipDist = Math.hypot(lm[pipIdx*2] - wristX, lm[pipIdx*2+1] - wristY);
+            rawStates[i + 1] = tipDist > pipDist * 1.02 ? 1 : 0;
         }
 
+        // Hysteresis: require HYST consecutive frames before switching
         for (let i = 0; i < 5; i++) {
             this.counters[i] = rawStates[i]
                 ? Math.max(1, this.counters[i] + 1)
                 : Math.min(-1, this.counters[i] - 1);
-            if (this.counters[i] >= this.hysteresisFrames && !this.states[i]) this.states[i] = 1;
-            else if (this.counters[i] <= -this.hysteresisFrames && this.states[i]) this.states[i] = 0;
+            if (this.counters[i] >= this.HYST && !this.states[i]) this.states[i] = 1;
+            else if (this.counters[i] <= -this.HYST && this.states[i]) this.states[i] = 0;
         }
         return Array.from(this.states);
     }
 
     reset() { this.counters.fill(0); this.states.fill(0); }
-
-    _angle(ax, ay, bx, by, cx, cy) {
-        const baX = ax-bx, baY = ay-by, bcX = cx-bx, bcY = cy-by;
-        const dot = baX*bcX + baY*bcY;
-        const m = Math.sqrt(baX*baX+baY*baY) * Math.sqrt(bcX*bcX+bcY*bcY);
-        return m === 0 ? 0 : Math.acos(Math.max(-1, Math.min(1, dot/m))) * 57.2958;
-    }
 }
 
 // ============================================================
@@ -285,31 +272,57 @@ class DrawingEngine {
         this.mode = MODE.IDLE;
         this.activeColor = COLORS[0];
         this.brushSize = 12;
-        this.eraserSize = 80;
+        // Bigger eraser on mobile (screen is smaller so fingers cover more area)
+        const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+        this.eraserSize = isMobile ? 200 : 80;
         this.lastX = null;
         this.lastY = null;
+        // Smoothing buffer for quadratic Bézier midpoint technique
+        this.prevMidX = null;
+        this.prevMidY = null;
+
+        // Mode-switch hysteresis: require 4 consecutive frames wanting a NEW mode
+        this._pendingMode = MODE.IDLE;
+        this._pendingCount = 0;
+        this._SWITCH_FRAMES = 4;
     }
 
     processFrame(landmarks, fingerStates, viewW, viewH) {
         const [thumb, index, middle, ring, pinky] = fingerStates;
-        const totalFingers = thumb + index + middle + ring + pinky;
 
-        let newMode;
-        // Erase if 4 or 5 fingers are up
-        if (totalFingers >= 4) {
-            newMode = MODE.ERASING;
-        } 
-        // Draw if ONLY the index finger is up (thumb can be up or down, we don't care to prevent jitter)
-        else if (index === 1 && middle === 0 && ring === 0 && pinky === 0) {
-            newMode = MODE.DRAWING;
-        } 
+        let wantMode;
+        // ---- IDLE: only when exactly index + middle are up (peace sign / 2 fingers) ----
+        if (index === 1 && middle === 1 && ring === 0 && pinky === 0) {
+            wantMode = MODE.IDLE;
+        }
+        // ---- ERASE: open palm (4+ fingers) ----
+        else if ((index + middle + ring + pinky) >= 4) {
+            wantMode = MODE.ERASING;
+        }
+        // ---- DRAW: everything else when index is up (default action!) ----
+        else if (index === 1) {
+            wantMode = MODE.DRAWING;
+        }
+        // Fist or unrecognized → keep current mode (don't jump to idle!)
         else {
-            newMode = MODE.IDLE;
+            wantMode = this.mode;
         }
 
-        if (newMode !== this.mode) {
-            this._onModeExit();
-            this.mode = newMode;
+        // Hysteresis: only switch after _SWITCH_FRAMES consecutive frames agree
+        if (wantMode !== this.mode) {
+            if (wantMode === this._pendingMode) {
+                this._pendingCount++;
+            } else {
+                this._pendingMode = wantMode;
+                this._pendingCount = 1;
+            }
+            if (this._pendingCount >= this._SWITCH_FRAMES) {
+                this._onModeExit();
+                this.mode = wantMode;
+                this._pendingCount = 0;
+            }
+        } else {
+            this._pendingCount = 0;
         }
 
         switch (this.mode) {
@@ -326,6 +339,8 @@ class DrawingEngine {
     _onModeExit() {
         this.lastX = null;
         this.lastY = null;
+        this.prevMidX = null;
+        this.prevMidY = null;
         this.stateSaved = false;
     }
 
@@ -339,8 +354,8 @@ class DrawingEngine {
     }
 
     _handleDrawing(lm, fs, vw, vh) {
-        // Always draw from the Index finger tip (index 1 in TIP_IDS)
-        const tipId = TIP_IDS[1]; 
+        // Always draw from the Index finger tip (landmark 8)
+        const tipId = 8; 
         const normX = 1 - lm[tipId*2];
         const normY = lm[tipId*2+1];
         const canvasX = normX * this.width;
@@ -356,10 +371,25 @@ class DrawingEngine {
         this.ctx.shadowBlur = this.brushSize * 0.4;
 
         if (this.lastX !== null) {
-            this.ctx.beginPath();
-            this.ctx.moveTo(this.lastX, this.lastY);
-            this.ctx.lineTo(canvasX, canvasY);
-            this.ctx.stroke();
+            // Quadratic Bézier midpoint smoothing for buttery curves
+            const midX = (this.lastX + canvasX) / 2;
+            const midY = (this.lastY + canvasY) / 2;
+
+            if (this.prevMidX !== null) {
+                this.ctx.beginPath();
+                this.ctx.moveTo(this.prevMidX, this.prevMidY);
+                this.ctx.quadraticCurveTo(this.lastX, this.lastY, midX, midY);
+                this.ctx.stroke();
+            } else {
+                // First segment: simple line
+                this.ctx.beginPath();
+                this.ctx.moveTo(this.lastX, this.lastY);
+                this.ctx.lineTo(canvasX, canvasY);
+                this.ctx.stroke();
+            }
+
+            this.prevMidX = midX;
+            this.prevMidY = midY;
         }
 
         this.ctx.shadowBlur = 0;
@@ -449,7 +479,7 @@ class AirCanvasApp {
 
         this.handLandmarker = null;
         this.stabilizer = new LandmarkStabilizer(0.5, 0.3);
-        this.fingerDetector = new FingerDetector(2);
+        this.fingerDetector = new FingerDetector();
         this.drawingEngine = null;
         this.handRenderer = new HandRenderer();
         this.particles = new ParticleSystem();
