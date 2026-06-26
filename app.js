@@ -304,31 +304,51 @@ class DrawingEngine {
         this.prevMidX = null;
         this.prevMidY = null;
 
-        // Mode-switch hysteresis: require 4 consecutive frames wanting a NEW mode
+        // Mode-switch hysteresis: require more frames on mobile (since we skip every other frame)
         this._pendingMode = MODE.IDLE;
         this._pendingCount = 0;
-        this._SWITCH_FRAMES = 4;
+        this._SWITCH_FRAMES = IS_MOBILE ? 8 : 4;
     }
 
     processFrame(landmarks, fingerStates, viewW, viewH) {
         const [thumb, index, middle, ring, pinky] = fingerStates;
 
         let wantMode;
-        // ---- IDLE: only when exactly index + middle are up (peace sign / 2 fingers) ----
-        if (index === 1 && middle === 1 && ring === 0 && pinky === 0) {
-            wantMode = MODE.IDLE;
-        }
-        // ---- ERASE: open palm (4+ fingers) ----
-        else if ((index + middle + ring + pinky) >= 4) {
-            wantMode = MODE.ERASING;
-        }
-        // ---- DRAW: everything else when index is up (default action!) ----
-        else if (index === 1) {
-            wantMode = MODE.DRAWING;
-        }
-        // Fist or unrecognized → keep current mode (don't jump to idle!)
-        else {
-            wantMode = this.mode;
+
+        if (IS_MOBILE) {
+            // ===== MOBILE: simplified rules to prevent false idle triggers =====
+            // On mobile, low-res camera makes middle finger unreliable.
+            // IDLE only happens when hand leaves the frame (onNoHand).
+            // ERASE: all 4 fingers up
+            if ((index + middle + ring + pinky) >= 4) {
+                wantMode = MODE.ERASING;
+            }
+            // DRAW: index finger is up (default — don't care about other fingers)
+            else if (index === 1) {
+                wantMode = MODE.DRAWING;
+            }
+            // Fist or unrecognized → keep current mode
+            else {
+                wantMode = this.mode;
+            }
+        } else {
+            // ===== DESKTOP: full gesture set =====
+            // IDLE: peace sign (index + middle, nothing else)
+            if (index === 1 && middle === 1 && ring === 0 && pinky === 0) {
+                wantMode = MODE.IDLE;
+            }
+            // ERASE: open palm (4+ fingers)
+            else if ((index + middle + ring + pinky) >= 4) {
+                wantMode = MODE.ERASING;
+            }
+            // DRAW: index finger up (default action!)
+            else if (index === 1) {
+                wantMode = MODE.DRAWING;
+            }
+            // Fist or unrecognized → keep current mode
+            else {
+                wantMode = this.mode;
+            }
         }
 
         // Hysteresis: only switch after _SWITCH_FRAMES consecutive frames agree
