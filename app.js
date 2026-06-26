@@ -1109,6 +1109,19 @@ class AirCanvasApp {
     }
 
     _setupEventListeners() {
+        const setActiveTool = (activeId) => {
+            ['draw-btn', 'select-btn'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    if (id === activeId) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                }
+            });
+        };
+
         document.getElementById("guide-dismiss-btn").addEventListener("click", () => {
             this.gestureGuide.classList.add("hidden");
         });
@@ -1137,10 +1150,24 @@ class AirCanvasApp {
             this.gestureGuide.classList.toggle("hidden");
         });
 
+        const drawBtn = document.getElementById("draw-btn");
+        if (drawBtn) {
+            drawBtn.addEventListener("click", () => {
+                if (this.drawingEngine) {
+                    this.drawingEngine.commitSelection();
+                    this.drawingEngine.tool = "brush";
+                }
+                setActiveTool('draw-btn');
+                document.getElementById("brush-panel").classList.add("hidden");
+                document.getElementById("color-picker").classList.add("hidden");
+            });
+        }
+
         document.getElementById("color-btn").addEventListener("click", () => {
             if (this.drawingEngine) {
                 this.drawingEngine.commitSelection();
                 this.drawingEngine.tool = "brush";
+                setActiveTool('draw-btn');
             }
             document.getElementById("color-picker").classList.toggle("hidden");
             document.getElementById("brush-panel").classList.add("hidden");
@@ -1150,6 +1177,7 @@ class AirCanvasApp {
             if (this.drawingEngine) {
                 this.drawingEngine.commitSelection();
                 this.drawingEngine.tool = "brush";
+                setActiveTool('draw-btn');
             }
             document.getElementById("brush-panel").classList.toggle("hidden");
             document.getElementById("color-picker").classList.add("hidden");
@@ -1162,6 +1190,7 @@ class AirCanvasApp {
                     this.drawingEngine.commitSelection();
                     this.drawingEngine.tool = "select";
                 }
+                setActiveTool('select-btn');
                 document.getElementById("brush-panel").classList.add("hidden");
                 document.getElementById("color-picker").classList.add("hidden");
                 this._showToast("Selector Pen activated ✂️");
