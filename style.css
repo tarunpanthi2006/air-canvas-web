@@ -496,6 +496,12 @@ html, body {
     color: var(--neon-cyan);
     box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
 }
+.mode-indicator[data-mode="moving"] {
+    background: rgba(168, 85, 247, 0.18);
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    color: var(--neon-purple);
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.15);
+}
 .mode-indicator[data-mode="penup"] {
     background: rgba(249, 115, 22, 0.18);
     border: 1px solid rgba(249, 115, 22, 0.4);

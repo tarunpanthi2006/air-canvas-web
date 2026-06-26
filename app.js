@@ -25,7 +25,7 @@ const COLORS = [
     "#F0F0FF", "#64748B", "#8B5CF6", "#06B6D4",
 ];
 
-const MODE = { IDLE: "idle", DRAWING: "drawing", ERASING: "erasing" };
+const MODE = { IDLE: "idle", DRAWING: "drawing", ERASING: "erasing", SELECTING: "selecting", MOVING: "moving" };
 const TIP_IDS = [4, 8, 12, 16, 20];
 const IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -304,6 +304,11 @@ class DrawingEngine {
         this.prevMidX = null;
         this.prevMidY = null;
 
+        this.tool = "brush";
+        this.selection = null;
+        this.selectStartX = null;
+        this.selectStartY = null;
+
         // Mode-switch hysteresis: require more frames on mobile (since we skip every other frame)
         this._pendingMode = MODE.IDLE;
         this._pendingCount = 0;
@@ -329,40 +334,46 @@ class DrawingEngine {
             return { x: normX * viewW, y: normY * viewH, mode: MODE.IDLE, visible: true, penUp: true };
         }
 
+        const tipId = 8;
+        const canvasX = (1 - landmarks[tipId*2]) * this.width;
+        const canvasY = landmarks[tipId*2+1] * this.height;
+
         let wantMode;
+
+        const getDrawOrSelectMode = () => {
+            if (this.tool === "select") {
+                if (this.selection) {
+                    const padding = 30;
+                    if (this.mode === MODE.MOVING) return MODE.MOVING; // stay moving
+                    if (canvasX >= this.selection.x - padding && canvasX <= this.selection.x + this.selection.w + padding &&
+                        canvasY >= this.selection.y - padding && canvasY <= this.selection.y + this.selection.h + padding) {
+                        return MODE.MOVING;
+                    }
+                    return MODE.SELECTING; // outside bounds, start new selection
+                }
+                return MODE.SELECTING;
+            }
+            return MODE.DRAWING;
+        };
 
         if (IS_MOBILE) {
             // ===== MOBILE: simplified rules to prevent false idle triggers =====
-            // On mobile, low-res camera makes middle finger unreliable.
-            // IDLE only happens when hand leaves the frame (onNoHand).
-            // ERASE: all 4 fingers up
             if ((index + middle + ring + pinky) >= 4) {
                 wantMode = MODE.ERASING;
-            }
-            // DRAW: index finger is up (default — don't care about other fingers)
-            else if (index === 1) {
-                wantMode = MODE.DRAWING;
-            }
-            // Fist or unrecognized → keep current mode
-            else {
+            } else if (index === 1) {
+                wantMode = getDrawOrSelectMode();
+            } else {
                 wantMode = this.mode;
             }
         } else {
             // ===== DESKTOP: full gesture set =====
-            // IDLE: peace sign (index + middle, nothing else)
             if (index === 1 && middle === 1 && ring === 0 && pinky === 0) {
                 wantMode = MODE.IDLE;
-            }
-            // ERASE: open palm (4+ fingers)
-            else if ((index + middle + ring + pinky) >= 4) {
+            } else if ((index + middle + ring + pinky) >= 4) {
                 wantMode = MODE.ERASING;
-            }
-            // DRAW: index finger up (default action!)
-            else if (index === 1) {
-                wantMode = MODE.DRAWING;
-            }
-            // Fist or unrecognized → keep current mode
-            else {
+            } else if (index === 1) {
+                wantMode = getDrawOrSelectMode();
+            } else {
                 wantMode = this.mode;
             }
         }
@@ -376,7 +387,7 @@ class DrawingEngine {
                 this._pendingCount = 1;
             }
             if (this._pendingCount >= this._SWITCH_FRAMES) {
-                this._onModeExit();
+                this._onModeExit(wantMode);
                 this.mode = wantMode;
                 this._pendingCount = 0;
             }
@@ -387,15 +398,39 @@ class DrawingEngine {
         switch (this.mode) {
             case MODE.DRAWING: return this._handleDrawing(landmarks, fingerStates, viewW, viewH);
             case MODE.ERASING: return this._handleErasing(landmarks, viewW, viewH);
+            case MODE.SELECTING: return this._handleSelecting(landmarks, viewW, viewH);
+            case MODE.MOVING: return this._handleMoving(landmarks, viewW, viewH);
             default: return { x: 0, y: 0, mode: MODE.IDLE, visible: false };
         }
     }
 
     onNoHand() {
-        if (this.mode !== MODE.IDLE) { this._onModeExit(); this.mode = MODE.IDLE; }
+        if (this.mode !== MODE.IDLE) { this._onModeExit(MODE.IDLE); this.mode = MODE.IDLE; }
     }
 
-    _onModeExit() {
+    _onModeExit(nextMode) {
+        if (this.mode === MODE.SELECTING && this.selectStartX !== null && this.lastX !== null) {
+            const minX = Math.min(this.selectStartX, this.lastX);
+            const minY = Math.min(this.selectStartY, this.lastY);
+            const w = Math.abs(this.lastX - this.selectStartX);
+            const h = Math.abs(this.lastY - this.selectStartY);
+
+            if (w > 10 && h > 10) {
+                this._saveUndo();
+                this.selection = {
+                    imageData: this.ctx.getImageData(minX, minY, w, h),
+                    x: minX, y: minY, w: w, h: h
+                };
+                this.ctx.clearRect(minX, minY, w, h);
+            }
+            this.selectStartX = null;
+            this.selectStartY = null;
+        }
+
+        if (nextMode === MODE.SELECTING && this.selection) {
+            this.commitSelection();
+        }
+
         this.lastX = null;
         this.lastY = null;
         this.prevMidX = null;
@@ -494,19 +529,75 @@ class DrawingEngine {
         };
     }
 
+    _handleSelecting(lm, vw, vh) {
+        const tipId = 8;
+        const normX = 1 - lm[tipId*2];
+        const normY = lm[tipId*2+1];
+        const canvasX = normX * this.width;
+        const canvasY = normY * this.height;
+
+        if (this.selectStartX === null) {
+            this.selectStartX = canvasX;
+            this.selectStartY = canvasY;
+        }
+        this.lastX = canvasX;
+        this.lastY = canvasY;
+
+        return { 
+            x: normX * vw, y: normY * vh, 
+            mode: this.mode, visible: true, 
+            selectStartX: this.selectStartX, selectStartY: this.selectStartY,
+            canvasX, canvasY 
+        };
+    }
+
+    _handleMoving(lm, vw, vh) {
+        const tipId = 8;
+        const normX = 1 - lm[tipId*2];
+        const normY = lm[tipId*2+1];
+        const canvasX = normX * this.width;
+        const canvasY = normY * this.height;
+
+        if (this.selection && this.lastX !== null) {
+            this.selection.x += (canvasX - this.lastX);
+            this.selection.y += (canvasY - this.lastY);
+        }
+        this.lastX = canvasX;
+        this.lastY = canvasY;
+
+        return { 
+            x: normX * vw, y: normY * vh, 
+            mode: this.mode, visible: true, 
+            selection: this.selection 
+        };
+    }
+
+    commitSelection() {
+        if (!this.selection) return;
+        const temp = document.createElement("canvas");
+        temp.width = this.selection.w;
+        temp.height = this.selection.h;
+        temp.getContext("2d").putImageData(this.selection.imageData, 0, 0);
+        this.ctx.drawImage(temp, this.selection.x, this.selection.y);
+        this.selection = null;
+    }
+
     undo() {
+        this.commitSelection();
         if (!this.undoStack.length) return;
         this.redoStack.push(this.ctx.getImageData(0,0,this.width,this.height));
         this.ctx.putImageData(this.undoStack.pop(), 0, 0);
     }
 
     redo() {
+        this.commitSelection();
         if (!this.redoStack.length) return;
         this.undoStack.push(this.ctx.getImageData(0,0,this.width,this.height));
         this.ctx.putImageData(this.redoStack.pop(), 0, 0);
     }
 
     clearCanvas() {
+        this.commitSelection();
         this._saveUndo();
         this.stateSaved = false;
         this.ctx.clearRect(0, 0, this.width, this.height);
@@ -766,6 +857,21 @@ class AirCanvasApp {
     _renderDrawing() {
         this.drawCtx.clearRect(0, 0, this.drawingCanvas.width, this.drawingCanvas.height);
         this.drawCtx.drawImage(this.drawingEngine.offscreen, 0, 0);
+        
+        // Render floating selection if it exists
+        if (this.drawingEngine && this.drawingEngine.selection) {
+            const sel = this.drawingEngine.selection;
+            const temp = document.createElement("canvas");
+            temp.width = sel.w;
+            temp.height = sel.h;
+            temp.getContext("2d").putImageData(sel.imageData, 0, 0);
+            
+            this.drawCtx.save();
+            this.drawCtx.shadowColor = "rgba(180, 92, 255, 0.4)";
+            this.drawCtx.shadowBlur = 15;
+            this.drawCtx.drawImage(temp, sel.x, sel.y);
+            this.drawCtx.restore();
+        }
     }
 
     _renderCursor(cursor, vw, vh) {
@@ -847,6 +953,50 @@ class AirCanvasApp {
                 ctx.stroke();
                 break;
             }
+            case MODE.SELECTING: {
+                if (cursor.selectStartX !== undefined && cursor.canvasX !== undefined) {
+                    const sx = cursor.selectStartX * (vw / this.drawingEngine.width);
+                    const sy = cursor.selectStartY * (vh / this.drawingEngine.height);
+                    const cx = cursor.canvasX * (vw / this.drawingEngine.width);
+                    const cy = cursor.canvasY * (vh / this.drawingEngine.height);
+                    
+                    ctx.setLineDash([8, 8]);
+                    ctx.strokeStyle = "#00E5FF";
+                    ctx.lineWidth = 2;
+                    ctx.shadowColor = "#00E5FF";
+                    ctx.shadowBlur = 8;
+                    ctx.strokeRect(sx, sy, cx - sx, cy - sy);
+                    ctx.setLineDash([]);
+                    ctx.shadowBlur = 0;
+                }
+                ctx.strokeStyle = "#00E5FF";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x-8, y); ctx.lineTo(x+8, y);
+                ctx.moveTo(x, y-8); ctx.lineTo(x, y+8);
+                ctx.stroke();
+                break;
+            }
+            case MODE.MOVING: {
+                if (cursor.selection) {
+                    const sel = cursor.selection;
+                    const sx = sel.x * (vw / this.drawingEngine.width);
+                    const sy = sel.y * (vh / this.drawingEngine.height);
+                    const sw = sel.w * (vw / this.drawingEngine.width);
+                    const sh = sel.h * (vh / this.drawingEngine.height);
+                    
+                    ctx.setLineDash([6, 6]);
+                    ctx.strokeStyle = "#B45CFF";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(sx, sy, sw, sh);
+                    ctx.setLineDash([]);
+                }
+                ctx.fillStyle = "#B45CFF";
+                ctx.beginPath();
+                ctx.arc(x, y, 6, 0, Math.PI * 2);
+                ctx.fill();
+                break;
+            }
         }
 
         // Ghost cursor when pen is up (draw after switch so it overlays)
@@ -877,6 +1027,8 @@ class AirCanvasApp {
             [MODE.IDLE]: { icon: "✊", text: "Idle" },
             [MODE.DRAWING]: { icon: "✏️", text: "Drawing" },
             [MODE.ERASING]: { icon: "🧹", text: "Erasing" },
+            [MODE.SELECTING]: { icon: "✂️", text: "Selecting" },
+            [MODE.MOVING]: { icon: "✋", text: "Moving" },
             "penup": { icon: "✋", text: "Pen Up" },
         };
         const c = cfg[mode] || cfg[MODE.IDLE];
@@ -940,14 +1092,35 @@ class AirCanvasApp {
         });
 
         document.getElementById("color-btn").addEventListener("click", () => {
+            if (this.drawingEngine) {
+                this.drawingEngine.commitSelection();
+                this.drawingEngine.tool = "brush";
+            }
             document.getElementById("color-picker").classList.toggle("hidden");
             document.getElementById("brush-panel").classList.add("hidden");
         });
 
         document.getElementById("brush-btn").addEventListener("click", () => {
+            if (this.drawingEngine) {
+                this.drawingEngine.commitSelection();
+                this.drawingEngine.tool = "brush";
+            }
             document.getElementById("brush-panel").classList.toggle("hidden");
             document.getElementById("color-picker").classList.add("hidden");
         });
+
+        const selectBtn = document.getElementById("select-btn");
+        if (selectBtn) {
+            selectBtn.addEventListener("click", () => {
+                if (this.drawingEngine) {
+                    this.drawingEngine.commitSelection();
+                    this.drawingEngine.tool = "select";
+                }
+                document.getElementById("brush-panel").classList.add("hidden");
+                document.getElementById("color-picker").classList.add("hidden");
+                this._showToast("Selector Pen activated ✂️");
+            });
+        }
 
         const slider = document.getElementById("brush-slider");
         const sizeLabel = document.getElementById("brush-size-label");
