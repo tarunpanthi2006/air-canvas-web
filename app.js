@@ -306,8 +306,7 @@ class DrawingEngine {
 
         this.tool = "brush";
         this.selection = null;
-        this.selectStartX = null;
-        this.selectStartY = null;
+        this.selectionPath = [];
 
         // Mode-switch hysteresis: require more frames on mobile (since we skip every other frame)
         this._pendingMode = MODE.IDLE;
@@ -409,22 +408,52 @@ class DrawingEngine {
     }
 
     _onModeExit(nextMode) {
-        if (this.mode === MODE.SELECTING && this.selectStartX !== null && this.lastX !== null) {
-            const minX = Math.min(this.selectStartX, this.lastX);
-            const minY = Math.min(this.selectStartY, this.lastY);
-            const w = Math.abs(this.lastX - this.selectStartX);
-            const h = Math.abs(this.lastY - this.selectStartY);
+        if (this.mode === MODE.SELECTING && this.selectionPath.length > 2) {
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const p of this.selectionPath) {
+                if (p.x < minX) minX = p.x;
+                if (p.y < minY) minY = p.y;
+                if (p.x > maxX) maxX = p.x;
+                if (p.y > maxY) maxY = p.y;
+            }
+
+            const w = maxX - minX;
+            const h = maxY - minY;
 
             if (w > 10 && h > 10) {
                 this._saveUndo();
+                
+                const path = new Path2D();
+                path.moveTo(this.selectionPath[0].x, this.selectionPath[0].y);
+                for (let i = 1; i < this.selectionPath.length; i++) {
+                    path.lineTo(this.selectionPath[i].x, this.selectionPath[i].y);
+                }
+                path.closePath();
+
+                const temp = document.createElement("canvas");
+                temp.width = w;
+                temp.height = h;
+                const tempCtx = temp.getContext("2d");
+                
+                tempCtx.translate(-minX, -minY);
+                tempCtx.fill(path);
+                tempCtx.globalCompositeOperation = "source-in";
+                tempCtx.drawImage(this.ctx.canvas, 0, 0);
+                
+                const imageData = tempCtx.getImageData(0, 0, w, h);
+
+                this.ctx.save();
+                this.ctx.globalCompositeOperation = "destination-out";
+                this.ctx.fill(path);
+                this.ctx.restore();
+
                 this.selection = {
-                    imageData: this.ctx.getImageData(minX, minY, w, h),
-                    x: minX, y: minY, w: w, h: h
+                    imageData: imageData,
+                    x: minX, y: minY, w: w, h: h,
+                    path: this.selectionPath.map(p => ({ x: p.x - minX, y: p.y - minY }))
                 };
-                this.ctx.clearRect(minX, minY, w, h);
             }
-            this.selectStartX = null;
-            this.selectStartY = null;
+            this.selectionPath = [];
         }
 
         if (nextMode === MODE.SELECTING && this.selection) {
@@ -536,18 +565,15 @@ class DrawingEngine {
         const canvasX = normX * this.width;
         const canvasY = normY * this.height;
 
-        if (this.selectStartX === null) {
-            this.selectStartX = canvasX;
-            this.selectStartY = canvasY;
-        }
+        this.selectionPath.push({ x: canvasX, y: canvasY });
+        
         this.lastX = canvasX;
         this.lastY = canvasY;
 
         return { 
             x: normX * vw, y: normY * vh, 
             mode: this.mode, visible: true, 
-            selectStartX: this.selectStartX, selectStartY: this.selectStartY,
-            canvasX, canvasY 
+            selectionPath: [...this.selectionPath]
         };
     }
 
@@ -954,18 +980,22 @@ class AirCanvasApp {
                 break;
             }
             case MODE.SELECTING: {
-                if (cursor.selectStartX !== undefined && cursor.canvasX !== undefined) {
-                    const sx = cursor.selectStartX * (vw / this.drawingEngine.width);
-                    const sy = cursor.selectStartY * (vh / this.drawingEngine.height);
-                    const cx = cursor.canvasX * (vw / this.drawingEngine.width);
-                    const cy = cursor.canvasY * (vh / this.drawingEngine.height);
+                if (cursor.selectionPath && cursor.selectionPath.length > 0) {
+                    const scaleX = vw / this.drawingEngine.width;
+                    const scaleY = vh / this.drawingEngine.height;
                     
                     ctx.setLineDash([8, 8]);
                     ctx.strokeStyle = "#00E5FF";
                     ctx.lineWidth = 2;
                     ctx.shadowColor = "#00E5FF";
                     ctx.shadowBlur = 8;
-                    ctx.strokeRect(sx, sy, cx - sx, cy - sy);
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(cursor.selectionPath[0].x * scaleX, cursor.selectionPath[0].y * scaleY);
+                    for (let i = 1; i < cursor.selectionPath.length; i++) {
+                        ctx.lineTo(cursor.selectionPath[i].x * scaleX, cursor.selectionPath[i].y * scaleY);
+                    }
+                    ctx.stroke();
                     ctx.setLineDash([]);
                     ctx.shadowBlur = 0;
                 }
@@ -984,12 +1014,28 @@ class AirCanvasApp {
                     const sy = sel.y * (vh / this.drawingEngine.height);
                     const sw = sel.w * (vw / this.drawingEngine.width);
                     const sh = sel.h * (vh / this.drawingEngine.height);
+                    const scaleX = vw / this.drawingEngine.width;
+                    const scaleY = vh / this.drawingEngine.height;
                     
-                    ctx.setLineDash([6, 6]);
-                    ctx.strokeStyle = "#B45CFF";
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(sx, sy, sw, sh);
-                    ctx.setLineDash([]);
+                    if (sel.path && sel.path.length > 0) {
+                        ctx.setLineDash([6, 6]);
+                        ctx.strokeStyle = "#B45CFF";
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(sx + sel.path[0].x * scaleX, sy + sel.path[0].y * scaleY);
+                        for (let i = 1; i < sel.path.length; i++) {
+                            ctx.lineTo(sx + sel.path[i].x * scaleX, sy + sel.path[i].y * scaleY);
+                        }
+                        ctx.closePath();
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    } else {
+                        ctx.setLineDash([6, 6]);
+                        ctx.strokeStyle = "#B45CFF";
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(sx, sy, sw, sh);
+                        ctx.setLineDash([]);
+                    }
                 }
                 ctx.fillStyle = "#B45CFF";
                 ctx.beginPath();
