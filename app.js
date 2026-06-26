@@ -27,6 +27,7 @@ const COLORS = [
 
 const MODE = { IDLE: "idle", DRAWING: "drawing", ERASING: "erasing" };
 const TIP_IDS = [4, 8, 12, 16, 20];
+const IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 // Hand skeleton connection pairs (landmark index pairs)
 const HAND_CONNECTIONS = [
@@ -143,9 +144,10 @@ class ParticleSystem {
                 color,
             });
         }
-        // Cap particles
-        if (this.particles.length > 200) {
-            this.particles.splice(0, this.particles.length - 200);
+        // Cap particles (lower on mobile for performance)
+        const maxParticles = IS_MOBILE ? 30 : 200;
+        if (this.particles.length > maxParticles) {
+            this.particles.splice(0, this.particles.length - maxParticles);
         }
     }
 
@@ -165,8 +167,10 @@ class ParticleSystem {
         for (const p of this.particles) {
             ctx.globalAlpha = p.life * 0.7;
             ctx.fillStyle = p.color;
-            ctx.shadowColor = p.color;
-            ctx.shadowBlur = 8;
+            if (!IS_MOBILE) {
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 8;
+            }
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
             ctx.fill();
@@ -198,54 +202,73 @@ class HandRenderer {
             pts.push({ x: nx * w, y: ny * h });
         }
 
-        // Draw connections — neon lines
-        ctx.lineWidth = 2.5;
-        ctx.lineCap = "round";
-
-        for (const [a, b] of HAND_CONNECTIONS) {
-            const gradient = ctx.createLinearGradient(pts[a].x, pts[a].y, pts[b].x, pts[b].y);
-            gradient.addColorStop(0, `rgba(0, 229, 255, ${pulseAlpha * 0.6})`);
-            gradient.addColorStop(1, `rgba(180, 92, 255, ${pulseAlpha * 0.6})`);
-
-            ctx.strokeStyle = gradient;
-            ctx.shadowColor = "rgba(0, 229, 255, 0.4)";
-            ctx.shadowBlur = 6;
+        if (IS_MOBILE) {
+            // ===== MOBILE: lightweight skeleton (no gradients, no shadows) =====
+            ctx.strokeStyle = `rgba(0, 229, 255, ${pulseAlpha * 0.7})`;
+            ctx.lineWidth = 2;
+            ctx.lineCap = "round";
+            // Batch all lines into one path
             ctx.beginPath();
-            ctx.moveTo(pts[a].x, pts[a].y);
-            ctx.lineTo(pts[b].x, pts[b].y);
+            for (const [a, b] of HAND_CONNECTIONS) {
+                ctx.moveTo(pts[a].x, pts[a].y);
+                ctx.lineTo(pts[b].x, pts[b].y);
+            }
             ctx.stroke();
-        }
 
-        ctx.shadowBlur = 0;
-
-        // Draw landmark dots
-        for (let i = 0; i < 21; i++) {
-            const isTip = TIP_IDS.includes(i);
-            const radius = isTip ? 6 : 3.5;
-            const color = isTip ? "#00E5FF" : "#B45CFF";
-            const glowColor = isTip ? "rgba(0, 229, 255, 0.6)" : "rgba(180, 92, 255, 0.4)";
-
-            // Glow
-            ctx.fillStyle = glowColor;
-            ctx.shadowColor = color;
-            ctx.shadowBlur = isTip ? 14 : 6;
-            ctx.beginPath();
-            ctx.arc(pts[i].x, pts[i].y, radius + 3, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Core dot
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(pts[i].x, pts[i].y, radius, 0, Math.PI * 2);
-            ctx.fill();
-
-            // White center for tips
-            if (isTip) {
-                ctx.fillStyle = "rgba(255,255,255,0.8)";
+            // Only draw tip dots (5 instead of 21)
+            ctx.fillStyle = "#00E5FF";
+            for (const tipId of TIP_IDS) {
                 ctx.beginPath();
-                ctx.arc(pts[i].x, pts[i].y, 2, 0, Math.PI * 2);
+                ctx.arc(pts[tipId].x, pts[tipId].y, 5, 0, Math.PI * 2);
                 ctx.fill();
+            }
+        } else {
+            // ===== DESKTOP: full neon skeleton with gradients + shadows =====
+            ctx.lineWidth = 2.5;
+            ctx.lineCap = "round";
+
+            for (const [a, b] of HAND_CONNECTIONS) {
+                const gradient = ctx.createLinearGradient(pts[a].x, pts[a].y, pts[b].x, pts[b].y);
+                gradient.addColorStop(0, `rgba(0, 229, 255, ${pulseAlpha * 0.6})`);
+                gradient.addColorStop(1, `rgba(180, 92, 255, ${pulseAlpha * 0.6})`);
+
+                ctx.strokeStyle = gradient;
+                ctx.shadowColor = "rgba(0, 229, 255, 0.4)";
+                ctx.shadowBlur = 6;
+                ctx.beginPath();
+                ctx.moveTo(pts[a].x, pts[a].y);
+                ctx.lineTo(pts[b].x, pts[b].y);
+                ctx.stroke();
+            }
+
+            ctx.shadowBlur = 0;
+
+            // Draw all 21 landmark dots with glow
+            for (let i = 0; i < 21; i++) {
+                const isTip = TIP_IDS.includes(i);
+                const radius = isTip ? 6 : 3.5;
+                const color = isTip ? "#00E5FF" : "#B45CFF";
+                const glowColor = isTip ? "rgba(0, 229, 255, 0.6)" : "rgba(180, 92, 255, 0.4)";
+
+                ctx.fillStyle = glowColor;
+                ctx.shadowColor = color;
+                ctx.shadowBlur = isTip ? 14 : 6;
+                ctx.beginPath();
+                ctx.arc(pts[i].x, pts[i].y, radius + 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(pts[i].x, pts[i].y, radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (isTip) {
+                    ctx.fillStyle = "rgba(255,255,255,0.8)";
+                    ctx.beginPath();
+                    ctx.arc(pts[i].x, pts[i].y, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             }
         }
     }
@@ -524,9 +547,9 @@ class AirCanvasApp {
                 },
                 runningMode: "VIDEO",
                 numHands: 1,
-                minHandDetectionConfidence: 0.5,
-                minHandPresenceConfidence: 0.5,
-                minTrackingConfidence: 0.5,
+                minHandDetectionConfidence: IS_MOBILE ? 0.4 : 0.5,
+                minHandPresenceConfidence: IS_MOBILE ? 0.4 : 0.5,
+                minTrackingConfidence: IS_MOBILE ? 0.3 : 0.5,
             });
 
             this._setLoading(85, "Hand tracker ready!");
@@ -546,20 +569,20 @@ class AirCanvasApp {
     }
 
     async _requestCamera() {
+        const camWidth = IS_MOBILE ? 640 : 1280;
+        const camHeight = IS_MOBILE ? 480 : 720;
+        const camConfig = {
+            video: { facingMode: "user", width: { ideal: camWidth }, height: { ideal: camHeight } },
+            audio: false,
+        };
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-                audio: false,
-            });
+            const stream = await navigator.mediaDevices.getUserMedia(camConfig);
             this._startWithStream(stream);
         } catch {
             this.permissionScreen.classList.remove("hidden");
             document.getElementById("grant-camera-btn").addEventListener("click", async () => {
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-                        audio: false,
-                    });
+                    const stream = await navigator.mediaDevices.getUserMedia(camConfig);
                     this.permissionScreen.classList.add("hidden");
                     this._startWithStream(stream);
                 } catch {
@@ -614,8 +637,20 @@ class AirCanvasApp {
         }
 
         if (this.video.readyState >= 2 && now !== this.lastTimestamp) {
-            const results = this.handLandmarker.detectForVideo(this.video, now);
-            this._processResults(results);
+            // On mobile: skip detection every other frame to save CPU
+            if (IS_MOBILE) {
+                this._mobileFrameCount = (this._mobileFrameCount || 0) + 1;
+                if (this._mobileFrameCount % 2 === 0) {
+                    const results = this.handLandmarker.detectForVideo(this.video, now);
+                    this._processResults(results);
+                } else {
+                    // Re-render with last known state (smooth interpolation)
+                    this._renderDrawing();
+                }
+            } else {
+                const results = this.handLandmarker.detectForVideo(this.video, now);
+                this._processResults(results);
+            }
             this.lastTimestamp = now;
         }
 
