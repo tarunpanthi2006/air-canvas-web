@@ -48,7 +48,8 @@
     <div id="gesture-guide" class="modal-overlay hidden">
         <div class="gesture-guide-card">
             <h2>✨ Gesture Guide</h2>
-            <div class="gesture-list">
+            <!-- DESKTOP gestures -->
+            <div class="gesture-list" id="gesture-list-desktop">
                 <div class="gesture-item">
                     <span class="gesture-emoji">☝️</span>
                     <div>
@@ -78,6 +79,36 @@
                     </div>
                 </div>
             </div>
+            <!-- MOBILE gestures -->
+            <div class="gesture-list" id="gesture-list-mobile" style="display:none;">
+                <div class="gesture-item">
+                    <span class="gesture-emoji">☝️</span>
+                    <div>
+                        <strong>Point Index Finger</strong>
+                        <p>Draw with selected color</p>
+                    </div>
+                </div>
+                <div class="gesture-item">
+                    <span class="gesture-emoji">🖐️</span>
+                    <div>
+                        <strong>Open Palm</strong>
+                        <p>Erase</p>
+                    </div>
+                </div>
+                <div class="gesture-item">
+                    <span class="gesture-emoji">👋</span>
+                    <div>
+                        <strong>Move Hand Away</strong>
+                        <p>Pause drawing</p>
+                    </div>
+                </div>
+            </div>
+            <script>
+                if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                    document.getElementById('gesture-list-desktop').style.display = 'none';
+                    document.getElementById('gesture-list-mobile').style.display = '';
+                }
+            </script>
             <button id="guide-dismiss-btn" class="btn-primary">
                 <span>Got it! Let's draw 🎨</span>
             </button>
